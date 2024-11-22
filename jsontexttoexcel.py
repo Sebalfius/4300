@@ -101,6 +101,94 @@ class UpdateCredentialsDialog(wx.Dialog):
         """Close the dialog without saving"""
         self.EndModal(wx.ID_CANCEL)
 
+class AccountManager(wx.Frame):
+    def __init__(self, parent):
+        super().__init__(parent, title="Account Manager", size=(400, 300))
+        self.panel = wx.Panel(self)
+        self.sizer = wx.BoxSizer(wx.VERTICAL)
+        
+        # Load accounts from file
+        self.accounts = self.load_accounts("listofaccountstoread.txt")
+        
+        # ListBox to display accounts
+        self.account_list = wx.ListBox(self.panel, choices=self.accounts, style=wx.LB_SINGLE)
+        self.sizer.Add(self.account_list, proportion=1, flag=wx.ALL | wx.EXPAND, border=10)
+
+        # Buttons for operations
+        self.add_button = wx.Button(self.panel, label="Add Account")
+        self.remove_button = wx.Button(self.panel, label="Remove Selected")
+        self.save_button = wx.Button(self.panel, label="Save Changes")
+        #self.cancel_button = wx.Button(self.panel, label="Cancel")
+        
+        button_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        button_sizer.Add(self.add_button, flag=wx.RIGHT, border=5)
+        button_sizer.Add(self.remove_button, flag=wx.RIGHT, border=5)
+        button_sizer.Add(self.save_button, flag=wx.RIGHT, border=5)
+        #button_sizer.Add(self.cancel_button, flag=wx.RIGHT, border=5)
+        self.sizer.Add(button_sizer, flag=wx.ALL | wx.ALIGN_CENTER, border=10)
+
+        # Bind events
+        self.add_button.Bind(wx.EVT_BUTTON, self.on_add_account)
+        self.remove_button.Bind(wx.EVT_BUTTON, self.on_remove_selected)
+        self.save_button.Bind(wx.EVT_BUTTON, self.on_save_changes)
+        #self.cancel_button.Bind(wx.EVT_BUTTON, self.on_cancelation)
+
+        # Set sizer and center the window
+        self.panel.SetSizer(self.sizer)
+        self.Centre()
+        self.Show()
+
+    def load_accounts(self, filepath):
+        """Load accounts from a file."""
+        try:
+            with open(filepath, "r") as f:
+                return [line.strip() for line in f if line.strip()]
+        except FileNotFoundError:
+            return []
+
+    def save_accounts(self, filepath):
+        """Save accounts to a file."""
+        with open(filepath, "w") as f:
+            for account in self.accounts:
+                f.write(account + "\n")
+
+    def on_add_account(self, event):
+        """Add a new account."""
+        dialog = wx.TextEntryDialog(self, "Enter a 4-digit account number:", "Add Account")
+        if dialog.ShowModal() == wx.ID_OK:
+            account = dialog.GetValue().strip()
+            if account.isdigit() and len(account) == 4 and account not in self.accounts:
+                self.accounts.append(account)
+                self.account_list.Append(account)
+            else:
+                wx.MessageBox("Invalid account number. It must be a unique 4-digit number.", "Error", wx.ICON_ERROR)
+        dialog.Destroy()
+
+    def on_remove_selected(self, event):
+        """Remove the selected account."""
+        selection = self.account_list.GetSelection()
+        if selection != wx.NOT_FOUND:  # Ensure something is selected
+            account = self.account_list.GetString(selection)
+            self.accounts.remove(account)
+            self.account_list.Delete(selection)
+        else:
+            wx.MessageBox("Please select an account to remove.", "Error", wx.ICON_WARNING)
+
+    def on_save_changes(self, event):
+        """Save changes to the file."""
+        self.save_accounts("listofaccountstoread.txt")
+        wx.MessageBox("Changes saved successfully!", "Info", wx.ICON_INFORMATION)
+    
+    #def on_cancelation(self, event):
+        #"""Close the dialog without saving"""
+        #self.EndModal(wx.ID_CANCEL)
+
+class MyApp(wx.App):
+    def OnInit(self):
+        frame = AccountManager(None, title="Account Manager")
+        frame.Show()
+        return True
+
 class MyFrame(wx.Frame):
     def __init__(self, parent, title):
         super().__init__(parent, title=title, size=(1100, 650))
@@ -113,10 +201,12 @@ class MyFrame(wx.Frame):
 
         self.login_button = wx.Button(self.panel, label="Log In")
         self.ch_cred_button = wx.Button(self.panel, label="Change Credentials")
+        self.acct_mngmt = wx.Button(self.panel, label="Manage Accounts")
 
         # Add the login button and the new button to the horizontal sizer
         login_sizer.Add(self.login_button, flag=wx.RIGHT, border=10)
         login_sizer.Add(self.ch_cred_button, flag=wx.LEFT, border=10)
+        login_sizer.Add(self.acct_mngmt, flag=wx.LEFT, border=10)
 
         # Add the horizontal sizer with the login buttons to the main vertical sizer
         self.sizer.Add(login_sizer, flag=wx.ALL, border=10)
@@ -140,6 +230,7 @@ class MyFrame(wx.Frame):
         # Bind events
         self.login_button.Bind(wx.EVT_BUTTON, self.on_update_token)
         self.ch_cred_button.Bind(wx.EVT_BUTTON, self.on_modify_cred_file)
+        self.acct_mngmt.Bind(wx.EVT_BUTTON, self.on_manage_accounts)
         self.check_button.Bind(wx.EVT_BUTTON, self.fetch_operations)
         self.checkbox.Bind(wx.EVT_CHECKBOX, self.on_checkbox_toggled)
         self.run_button.Bind(wx.EVT_BUTTON, self.run_function)
@@ -158,6 +249,12 @@ class MyFrame(wx.Frame):
     def on_modify_cred_file(self, event):
         """Allows to change login credentials"""
         dialog = UpdateCredentialsDialog(self)
+        dialog.ShowModal()
+        dialog.Destroy()
+
+    def on_manage_accounts(self, event):
+        """Allows to change login credentials"""
+        dialog = AccountManager(self)
         dialog.ShowModal()
         dialog.Destroy()
     
@@ -348,7 +445,7 @@ class MyFrame(wx.Frame):
             df2['Moneda'] = df['Monedas'].apply(pesodolar)
             df2 = update_mercado(df, df2)
             def adjust_importe(df2):
-                df2.loc[df2['Mercado'] == "BYMA SENEBI", 'Importe'] *= 100
+                df2.loc[df2['Mercado'] == "BYMA SENEBI", 'Importe'] /= 100
                 return df2
             df2 = adjust_importe(df2)
             df2['GASTOS'] = '0'
@@ -407,9 +504,9 @@ class MyFrame(wx.Frame):
             print(f"ROFEX operationas saved to {excel_file_path3}")
             wb = load_workbook(excel_file_path3)
             ws = wb.active
-            bourdeaux_fill = PatternFill(start_color='702222', end_color='702222', fill_type='solid')
+            green_fill = PatternFill(start_color='92D050', end_color='92D050', fill_type='solid')
             for cell in ws[1]:
-                cell.fill = bourdeaux_fill
+                cell.fill = green_fill
             wb.save(excel_file_path3)
             print(f"Excel file saved with styled headers at {excel_file_path3}")
         else:
@@ -417,5 +514,5 @@ class MyFrame(wx.Frame):
 
 if __name__ == "__main__":
     app = wx.App(False)
-    frame = MyFrame(None, "[C.O.N.O.] Cargador Onírico de Neonumismáticos Onerosos")
+    frame = MyFrame(None, "[C.O.N.I.T.O.] Chequeador Óptimo de Nuevas Interacciones a Título Oneroso")
     app.MainLoop()   
