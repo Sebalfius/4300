@@ -2,7 +2,10 @@ import os
 import wx
 import sys
 import json
+import wx.adv
+import wx.grid
 import requests
+import subprocess
 import pandas as pd
 from datetime import datetime
 from openpyxl import load_workbook
@@ -27,7 +30,7 @@ class TextRedirect:
         self.text_ctrl.AppendText(message)
 
     def flush(self):
-        pass  # We don't need to do anything here.
+        pass
 
 class UpdateCredentialsDialog(wx.Dialog):
     """Dialog for updating the login credentials."""
@@ -146,11 +149,11 @@ class AccountManager(wx.Frame):
         except FileNotFoundError:
             return []
 
-    def save_accounts(self, filepath):
-        """Save accounts to a file."""
-        with open(filepath, "w") as f:
+    def save_accounts(self, file_path):
+        """Save accounts to the specified file."""
+        with open(file_path, "w") as file:
             for account in self.accounts:
-                f.write(account + "\n")
+                file.write(account + "\n")    
 
     def on_add_account(self, event):
         """Add a new account."""
@@ -164,6 +167,11 @@ class AccountManager(wx.Frame):
                 wx.MessageBox("Invalid account number. It must be a unique 4-digit number.", "Error", wx.ICON_ERROR)
         dialog.Destroy()
 
+    def on_save_changes(self, event):
+        file_path = os.path.join(app_dir, "listofaccountstoread.txt")
+        self.save_accounts(file_path)
+        wx.MessageBox(f"Changes saved successfully in {file_path}!", "Info", wx.ICON_INFORMATION)
+
     def on_remove_selected(self, event):
         """Remove the selected account."""
         selection = self.account_list.GetSelection()
@@ -173,11 +181,6 @@ class AccountManager(wx.Frame):
             self.account_list.Delete(selection)
         else:
             wx.MessageBox("Please select an account to remove.", "Error", wx.ICON_WARNING)
-
-    def on_save_changes(self, event):
-        """Save changes to the file."""
-        self.save_accounts("listofaccountstoread.txt")
-        wx.MessageBox("Changes saved successfully!", "Info", wx.ICON_INFORMATION)
     
     #def on_cancelation(self, event):
         #"""Close the dialog without saving"""
@@ -191,7 +194,7 @@ class MyApp(wx.App):
 
 class MyFrame(wx.Frame):
     def __init__(self, parent, title):
-        super().__init__(parent, title=title, size=(1100, 650))
+        super().__init__(parent, title=title, size=(1250, 750))
         
         self.panel = wx.Panel(self)
         self.sizer = wx.BoxSizer(wx.VERTICAL)
@@ -208,17 +211,42 @@ class MyFrame(wx.Frame):
         login_sizer.Add(self.ch_cred_button, flag=wx.LEFT, border=10)
         login_sizer.Add(self.acct_mngmt, flag=wx.LEFT, border=10)
 
+        date_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.checkbox = wx.CheckBox(self.panel, label="Using saved accounts", pos=(50, 50))
+        self.checkbox2 = wx.CheckBox(self.panel, label="Today", pos=(50, 50))
+        
+        self.label_start_date = wx.StaticText(self.panel, label="Start Date:")
+        self.start_date_picker = wx.adv.DatePickerCtrl(self.panel, style=wx.adv.DP_DROPDOWN)
+
+        self.label_end_date = wx.StaticText(self.panel, label="End Date:")
+        self.end_date_picker = wx.adv.DatePickerCtrl(self.panel, style=wx.adv.DP_DROPDOWN)
+
+        self.save_button = wx.Button(self.panel, label="Save Dates")
+        
+        date_sizer.Add(self.checkbox, flag=wx.ALL, border=10)
+        date_sizer.Add(self.checkbox2, flag=wx.ALL, border=10)
+        date_sizer.Add(self.label_start_date, flag=wx.ALL, border=10)
+        date_sizer.Add(self.start_date_picker, flag=wx.ALL | wx.EXPAND, border=10)
+        date_sizer.Add(self.label_end_date, flag=wx.ALL, border=10)
+        date_sizer.Add(self.end_date_picker, flag=wx.ALL | wx.EXPAND, border=10)
+        date_sizer.Add(self.save_button, flag=wx.ALL | wx.ALIGN_CENTER, border=10)        
+
         # Add the horizontal sizer with the login buttons to the main vertical sizer
         self.sizer.Add(login_sizer, flag=wx.ALL, border=10)
+        self.sizer.Add(date_sizer, flag=wx.ALL, border=10)
+        
+        self.midrowsizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.check_button = wx.Button(self.panel, label="Get Operations")
+        self.open_location = wx.Button(self.panel, label="File Location")
+        self.midrowsizer.Add(self.check_button, flag=wx.ALL, border=10)
+        self.midrowsizer.Add(self.open_location, flag=wx.ALL, border=10)
 
-        # Continue adding the other elements to the main vertical sizer                
-        self.checkbox = wx.CheckBox(self.panel, label="Using saved accounts", pos=(50, 50))
-        self.check_button = wx.Button(self.panel, label="Get Operations")              
+        # Continue adding the other elements to the main vertical sizer                                                     
         self.output_text_ctrl = wx.TextCtrl(self.panel, size=(300, 110), style=wx.TE_MULTILINE | wx.TE_READONLY)
         self.run_button = wx.Button(self.panel, label="View Operations")
-
-        self.sizer.Add(self.checkbox, flag=wx.ALL, border=10)
-        self.sizer.Add(self.check_button, flag=wx.ALL, border=10)                
+           
+        #self.sizer.Add()   
+        self.sizer.Add(self.midrowsizer, flag=wx.ALL, border=10)                          
         self.sizer.Add(self.output_text_ctrl, flag=wx.ALL | wx.EXPAND, border=10)
         self.sizer.Add(self.run_button, flag=wx.ALL, border=10)
 
@@ -226,13 +254,25 @@ class MyFrame(wx.Frame):
         
         #self.check_button.Disable()
         self.checkbox.SetValue(True)
+        self.checkbox2.SetValue(True)
+        self.df2 = None
+        self.df3 = None
+        self.date_for_url = datetime.now().strftime(r"%d/%m/%Y")
+        self.date_for_url2 = datetime.now().strftime(r"%d/%m/%Y")
+        self.date_for_file = datetime.now().strftime("%d-%m-%Y")
+        self.start_date_picker.Disable()
+        self.end_date_picker.Disable()
+        self.save_button.Disable()
 
         # Bind events
         self.login_button.Bind(wx.EVT_BUTTON, self.on_update_token)
         self.ch_cred_button.Bind(wx.EVT_BUTTON, self.on_modify_cred_file)
         self.acct_mngmt.Bind(wx.EVT_BUTTON, self.on_manage_accounts)
         self.check_button.Bind(wx.EVT_BUTTON, self.fetch_operations)
+        self.open_location.Bind(wx.EVT_BUTTON, self.open_program_location)
         self.checkbox.Bind(wx.EVT_CHECKBOX, self.on_checkbox_toggled)
+        self.checkbox2.Bind(wx.EVT_CHECKBOX, self.on_checkbox2_toggled)
+        self.save_button.Bind(wx.EVT_BUTTON, self.save_dates)
         self.run_button.Bind(wx.EVT_BUTTON, self.run_function)
         
         self.df = None  # Dataframe placeholder
@@ -245,6 +285,47 @@ class MyFrame(wx.Frame):
     def on_checkbox_toggled(self, event):
         self.check_button.Enable(self.checkbox.IsChecked())
     
+    def on_checkbox2_toggled(self, event):
+        isnt_checked = not self.checkbox2.IsChecked()
+        is_checked = self.checkbox2.IsChecked()
+        #print(f"Checkbox state: {'Checked' if isnt_checked else 'Unchecked'}")
+        self.start_date_picker.Enable(isnt_checked)
+        self.end_date_picker.Enable(isnt_checked)
+        self.save_button.Enable(isnt_checked)
+        if is_checked:
+            self.date_for_url = datetime.now().strftime("%d/%m/%Y")
+            self.date_for_url2 = datetime.now().strftime("%d/%m/%Y")
+            self.date_for_file = datetime.now().strftime("%d-%m-%Y")
+            print(f"Fechas de búsqueda reseteadas al día de hoy: {self.date_for_url}")
+
+    def save_dates(self, event):
+        """Save the selected dates in the required format."""
+        # Get the selected dates
+        start_date = self.start_date_picker.GetValue()
+        end_date = self.end_date_picker.GetValue()
+
+        # Convert wx.DateTime to Python datetime.date
+        start_date_py = datetime.strptime(start_date.FormatISODate(), "%Y-%m-%d")
+        end_date_py = datetime.strptime(end_date.FormatISODate(), "%Y-%m-%d")
+
+        # Format dates for the API as dd/mm/yyyy
+        self.date_for_url = start_date_py.strftime(f"%d/%m/%Y")
+        self.date_for_url2 = end_date_py.strftime(f"%d/%m/%Y")
+        self.date_for_file = end_date_py.strftime("%d-%m-%Y")
+
+        # Print or save the dates
+        print(f"Fecha de comienzo definida en: {self.date_for_url}")
+        print(f"Fecha de final definida en: {self.date_for_url2}")
+
+        # You can save these dates to a file or use them elsewhere in your application
+        file_path = os.path.join(app_dir, "dates.txt")  # Construct the full path
+
+    # Save the dates to the file
+        with open(file_path, "w", encoding="utf-8") as file:
+            file.write(f"{self.date_for_url}\n")
+            file.write(f"{self.date_for_url2}\n")
+
+        wx.MessageBox("Dates saved successfully!", "Info", wx.ICON_INFORMATION)
 
     def on_modify_cred_file(self, event):
         """Allows to change login credentials"""
@@ -283,9 +364,19 @@ class MyFrame(wx.Frame):
             print("Nuevo token guardado en authkey.json. El mismo tendrá validez por las próximas 24hs")                         
         else:
             print(f"Request failed with status code {response.status_code}: {response.text}")
+    
+    def open_program_location(self, event):
+        """Open the directory of the running program."""
+        try:
+            if os.name == 'nt':  # Windows
+                subprocess.Popen(f'explorer "{app_dir}"')
+            elif os.name == 'posix':  # macOS or Linux
+                subprocess.Popen(['open', app_dir]) if 'darwin' in os.sys.platform else subprocess.Popen(['xdg-open', app_dir])
+        except Exception as e:
+            wx.MessageBox(f"Could not open program location: {e}", "Error", wx.ICON_ERROR)
 
-    def run_function(self, event):
-        print('This will show grids for the files it created')
+    #def run_function(self, event):
+    #    print('This will show grids for the files it created')
 
     def fetch_operations(self, event):
         file_path = os.path.join(app_dir, "listofaccountstoread.txt")
@@ -295,13 +386,12 @@ class MyFrame(wx.Frame):
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}"
-        }
-        date_for_url = datetime.now().strftime("%d/%m/%Y")
+        }       
         with open(file_path, "r") as file:
             accounts = file.read().splitlines()
         responses = []
         for account in accounts:
-            uri = f"https://conosur.aunesa.com/Irmo/api/operaciones/informes?cuenta={account}&fechaDesde={date_for_url}&fechaHasta={date_for_url}"    
+            uri = f"https://conosur.aunesa.com/Irmo/api/operaciones/informes?cuenta={account}&fechaDesde={self.date_for_url}&fechaHasta={self.date_for_url2}"    
             try:
                 response = requests.get(uri, headers=headers)
                 response.raise_for_status()  # Raise an exception for HTTP errors
@@ -309,38 +399,23 @@ class MyFrame(wx.Frame):
             except requests.exceptions.RequestException as e:
                 print(f"Error recuperando operaciones para la cuenta {account}: {e}")
         final_json = json.dumps(responses, indent=4)
-        current_date = datetime.now().strftime("%Y-%m-%d")
-        file_name = f"InformedeOperaciones_{current_date}.json"
-        with open(file_name, "w", encoding="utf-8") as json_file:
+        file_name = f"InformedeOperaciones_{self.date_for_file}.json"
+        file_path = os.path.join(app_dir, file_name)
+        with open(file_path, "w", encoding="utf-8") as json_file:
             json_file.write(final_json)
         print(f"Data de operaciones guardada en {file_name}")
 
-        '''
-        try:
-            result = subprocess.run(
-                ["powershell", "-ExecutionPolicy", "Bypass", "-File", ps_script_path],
-                capture_output=True,
-                text=True
-            )    
-            print("Output:")
-            print(result.stdout)
-
-            if result.stderr:
-                print("Errors:")
-                print(result.stderr)
-        except Exception as e:
-            print(f"An error occurred: {e}")
-        '''
 
         today = datetime.now().strftime('%Y-%m-%d')
-        json_file_path = os.path.join(app_dir, f'InformedeOperaciones_{today}.json')   #f"C:\\Users\\sebastian.alfonso\\InformedeOperaciones_{today}.json"
+        json_file_path = os.path.join(app_dir, f'InformedeOperaciones_{self.date_for_file}.json')   #
+        #json_file_path = f"C:\\Users\\sebastian.alfonso\\InformedeOperaciones_2024-11-21.json"
 
         with open(json_file_path, encoding='utf-8') as file:
             raw_data = json.load(file)
         data = raw_data[0]
         df = pd.DataFrame(data)     # DF IS THE RAW JSON RECEIVED FROM AUNE'S API IN DATAFRAME FORM
-        print("Columns:", df.columns)
-        print(df.head())
+        #print("Columns:", df.columns)
+        #print(df.head())
         df['instrumento'] = df['instrumento'].astype(str).str.strip()
         dfb = df[df['instrumento'].str.match(r'^\[DLR\d{6}\]$', na=False)] # DFB IS JUST ROFEX OPERATIONS
         df = df[~df['instrumento'].str.match(r'^\[DLR\d{6}\]$', na=False)]
@@ -449,29 +524,32 @@ class MyFrame(wx.Frame):
                 return df2
             df2 = adjust_importe(df2)
             df2['GASTOS'] = '0'
-            excel_file_path2 = f'operacionesbyma_{today}.xlsx' #BYMA
-            df2.to_excel(excel_file_path2, index=False)
+            file_name = f"operacionesbyma_{today}.xlsx"  # Construct the filename
+            file_path = os.path.join(app_dir, file_name)  # Construct the full path           
+            df2.to_excel(file_path, index=False)
             print('Fetching BYMA operations...')
-            print(df2)
-            print(f"BYMA operationas saved to {excel_file_path2}.xlsxe")
-            wb = load_workbook(excel_file_path2)
+            #print(df2)
+            print(f"BYMA operationas saved to {self.date_for_file}.xlsx")
+            wb = load_workbook(file_path)
             ws = wb.active
             green_fill = PatternFill(start_color='92D050', end_color='92D050', fill_type='solid')
             for cell in ws[1]:
                 cell.fill = green_fill
-            wb.save(excel_file_path2)
-            print(f"Excel file saved with styled headers at {excel_file_path2}")
+            wb.save(file_path)
+            #print(f"Excel file saved with styled headers at {excel_file_path2}")
             print('...')
         else:
             print("No BYMA operations. Skipping processing.")
-
-        excel_file_path1 = f'informeopetraducido_{today}.xlsx' #JSON traducido
-        df.to_excel(excel_file_path1, index=False)
+        
+        self.df2 = pd.DataFrame()
+        self.df3 = pd.DataFrame()
+        self.df2 = df2
+        self.df3= df3
 
         if not dfb.empty and len(dfb) > 0:
             temp_results_b = dfb['neto'].apply(clean_currency)
-            print('neto')
-            print(dfb['neto'])
+            #print('neto')
+            #print(dfb['neto'])
             dfb['Neto'] = temp_results_b
             dfb['Monedas'] = dfb['Neto'].apply(lambda x: x.split()[0] if isinstance(x, str) and len(x.split()) > 1 else '')
             dfb['concertacion'] = pd.to_datetime(dfb['concertacion'], errors='coerce')
@@ -497,20 +575,90 @@ class MyFrame(wx.Frame):
             dfb['Gastos'] = pd.to_numeric(dfb['Gasto'], errors='coerce').fillna(0)
             dfb['Impuestos'] = pd.to_numeric(dfb['Impuesto'], errors='coerce').fillna(0)
             df3['GASTOS'] = dfb['Gastos'] + dfb['Impuestos']
-            excel_file_path3 = f'operacionesrofex_{today}.xlsx' #ROFEX
-            df3.to_excel(excel_file_path3, index=False)
+            file_name3 = f'operaciones_rofex_{self.date_for_file}.xlsx' #ROFEX
+            file_path3 = os.path.join(app_dir, file_name3)
+            df3.to_excel(file_path3, index=False)
             print('Fetching ROFEX operations...')
-            print(df3)
-            print(f"ROFEX operationas saved to {excel_file_path3}")
-            wb = load_workbook(excel_file_path3)
+            #print(df3)
+            print(f"ROFEX operationas saved to {file_path3}")
+            wb = load_workbook(file_path3)
             ws = wb.active
             green_fill = PatternFill(start_color='92D050', end_color='92D050', fill_type='solid')
             for cell in ws[1]:
                 cell.fill = green_fill
-            wb.save(excel_file_path3)
-            print(f"Excel file saved with styled headers at {excel_file_path3}")
+            wb.save(file_path3)
+            #print(f"Excel file saved with styled headers at {excel_file_path3}")
         else:
             print("No ROFEX operations. Skipping processing.")
+
+        self.df2 = pd.DataFrame()
+        self.df3 = pd.DataFrame()
+
+        if not df2.empty:                   
+            self.df2 = df2
+        
+        if not df2.empty:
+            self.df3= df3            
+
+    def run_function(self, event):
+    # Safely check for the existence of DataFrames
+        if hasattr(self, 'df2') and hasattr(self, 'df3') and (self.df2 is not None or self.df3 is not None):
+            print("Mostrando grillas de operaciones")
+
+            # Hide old grids if they exist
+            if hasattr(self, 'grid_sizer') and self.grid_sizer is not None:
+                self.grid_sizer.Clear(True)
+
+            self.grid_sizer = wx.BoxSizer(wx.VERTICAL)
+
+            # Create and populate the grid for df2
+            self.grid = wx.grid.Grid(self.panel)
+            self.grid.CreateGrid(len(self.df2), len(self.df2.columns))
+            for col, header in enumerate(self.df2.columns):
+                self.grid.SetColLabelValue(col, header)
+            for row in range(len(self.df2)):
+                for col in range(len(self.df2.columns)):
+                    value = self.df2.iloc[row, col]
+                    if col == self.df2.columns.get_loc('Importe'):  # Fixed to self.df2
+                        formatted_value = f"{value:.2f}"
+                        self.grid.SetCellValue(row, col, formatted_value)
+                        self.grid.SetCellAlignment(row, col, wx.ALIGN_RIGHT, wx.ALIGN_CENTER)
+                    else:
+                        self.grid.SetCellValue(row, col, str(value))
+
+            # Create and populate the grid for df3
+            self.gris = wx.grid.Grid(self.panel)
+            self.gris.CreateGrid(len(self.df3), len(self.df3.columns))
+            for col, header in enumerate(self.df3.columns):
+                self.gris.SetColLabelValue(col, header)
+            for row in range(len(self.df3)):
+                for col in range(len(self.df3.columns)):
+                    value = self.df3.iloc[row, col]
+                    if col == self.df3.columns.get_loc('Importe'):  # Fixed to self.df3
+                        formatted_value = f"{value:.2f}"
+                        self.gris.SetCellValue(row, col, formatted_value)
+                        self.gris.SetCellAlignment(row, col, wx.ALIGN_RIGHT, wx.ALIGN_CENTER)
+                    else:
+                        self.gris.SetCellValue(row, col, str(value))
+
+            # Add the grids to the grid_sizer
+            self.grid_sizer.Add(self.grid, flag=wx.EXPAND | wx.ALL, border=10)
+            self.grid_sizer.Add(self.gris, flag=wx.EXPAND | wx.ALL, border=10)
+
+            # Add the updated grid_sizer to the main sizer
+            self.sizer.Add(self.grid_sizer, flag=wx.EXPAND)
+
+            # Refresh the layout
+            self.panel.Layout()
+            self.panel.Fit()
+            self.Layout()
+
+            # Show the grids
+            self.grid.Show()
+            self.gris.Show()
+
+        else:
+            print("No hay operaciones cargadas aún")
 
 if __name__ == "__main__":
     app = wx.App(False)
